@@ -1,0 +1,663 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load lease_tags %}
+
+{% block title %}SFTP管理系统{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h1 class="page-title">SFTP管理系统</h1>
+            <p class="page-subtitle">管理内部用户账户和外部共享目录</p>
+        </div>
+    </div>
+
+    {% if expiring_soon or expired_leases %}
+    <div class="row mb-4">
+        {% if expiring_soon %}
+        <div class="col-md-6">
+            <div class="alert alert-warning">
+                <strong>提醒:</strong> 有 {{ expiring_soon.count }} 个外部目录将在 {{ lease_settings.default_notice_days }} 天内到期:
+                {% for lease in expiring_soon %}
+                    <span class="badge badge-warning ml-2">{{ lease.username }} ({{ lease.days_remaining }}天)</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if expired_leases %}
+        <div class="col-md-6">
+            <div class="alert alert-danger">
+                <strong>警告:</strong> 有 {{ expired_leases.count }} 个外部目录已过期，需要手动处理:
+                {% for lease in expired_leases %}
+                    <span class="badge badge-danger ml-2">{{ lease.username }} (过期{{ lease.days_remaining|abs }}天)</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if message %}
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                {{ error }}
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="row">
+        <!-- 统计卡片 -->
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <h5 class="card-title">内部用户</h5>
+                    <p class="card-text stat-number">{{ internal_count }}</p>
+                    <p class="card-text"><small class="text-muted">可登录SFTP的内部账户</small></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <h5 class="card-title">外部目录</h5>
+                    <p class="card-text stat-number">{{ external_count }}</p>
+                    <p class="card-text"><small class="text-muted">供外部共享的目录</small></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <h5 class="card-title">即将到期</h5>
+                    <p class="card-text stat-number">{{ expiring_soon.count }}</p>
+                    <p class="card-text"><small class="text-muted">未来{{ lease_settings.default_notice_days }}天内到期</small></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <h5 class="card-title">已过期目录</h5>
+                    <p class="card-text stat-number">{{ expired_leases.count }}</p>
+                    <p class="card-text"><small class="text-muted">需要手动处理</small></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if disk_usage %}
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">存储空间使用情况</div>
+                <div class="card-body">
+                    <div class="progress mb-3" style="height: 25px;">
+                        <div class="progress-bar bg-success" role="progressbar" style="width: {{ disk_usage.use_percent|cut:'%' }}%;"
+                             aria-valuenow="{{ disk_usage.use_percent|cut:'%' }}" aria-valuemin="0" aria-valuemax="100">
+                            {{ disk_usage.use_percent }}
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>已用: {{ disk_usage.used }} / 总计: {{ disk_usage.size }}</span>
+                        <span>可用: {{ disk_usage.avail }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="row">
+        <!-- 左侧：内部用户管理 -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>内部用户账户</span>
+                    <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#createInternalModal">
+                        <i class="fas fa-plus"></i> 创建用户
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>用户名</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if internal_users %}
+                                    {% for user in internal_users %}
+                                    <tr>
+                                        <td>{{ user.username }}</td>
+                                        <td>{{ user.created_at|date:"Y-m-d H:i" }}</td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <button class="btn btn-sm btn-warning reset-password-btn"
+                                                        data-username="{{ user.username }}"
+                                                        data-toggle="modal"
+                                                        data-target="#resetPasswordModal">
+                                                    <i class="fas fa-key"></i> 重置密码
+                                                </button>
+                                                <button class="btn btn-sm btn-danger delete-user-btn"
+                                                        data-username="{{ user.username }}"
+                                                        data-account-type="内部用户"
+                                                        data-toggle="modal"
+                                                        data-target="#deleteUserModal">
+                                                    <i class="fas fa-trash"></i> 删除
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted">暂无内部用户</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：外部目录管理 -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>外部共享目录</span>
+                    <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#createExternalModal">
+                        <i class="fas fa-plus"></i> 创建目录
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>目录名称</th>
+                                    <th>对接管理员</th>
+                                    <th>存储路径</th>
+                                    <th>租期状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if external_dirs %}
+                                    {% for user in external_dirs %}
+                                    <tr>
+                                        <td>{{ user.username }}</td>
+                                        <td>{{ user.manager }}</td>
+                                        <td style="font-family: monospace; font-size: 0.95rem;">{{ user.path }}</td>
+                                        <td>
+                                            {% with lease=active_leases_dict|dict_lookup:user.username %}
+                                                {% if lease %}
+                                                    <span {% if lease.days_remaining < lease_settings.default_notice_days %}class="text-danger font-weight-bold"{% endif %}>
+                                                        {{ lease.days_remaining }}天
+                                                        {% if lease.days_remaining <= lease_settings.default_notice_days %}
+                                                        (即将到期)
+                                                        {% endif %}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-warning">未设置租期</span>
+                                                {% endif %}
+                                            {% endwith %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <form method="post" style="display: inline;">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="action" value="toggle_permission">
+                                                    <input type="hidden" name="username" value="{{ user.username }}">
+                                                    {% if user.readonly %}
+                                                    <input type="hidden" name="permission_mode" value="readwrite">
+                                                    <button type="submit" class="btn btn-sm btn-success" title="切换为读写权限">
+                                                        <i class="fas fa-pencil-alt"></i> 读写
+                                                    </button>
+                                                    {% else %}
+                                                    <input type="hidden" name="permission_mode" value="readonly">
+                                                    <button type="submit" class="btn btn-sm btn-warning" title="切换为只读权限">
+                                                        <i class="fas fa-eye"></i> 只读
+                                                    </button>
+                                                    {% endif %}
+                                                </form>
+
+                                                {% with lease=active_leases_dict|dict_lookup:user.username %}
+                                                    {% if lease %}
+                                                    <button class="btn btn-sm btn-info renew-lease-btn ml-1"
+                                                            data-username="{{ user.username }}"
+                                                            data-toggle="modal"
+                                                            data-target="#renewLeaseModal">
+                                                        <i class="fas fa-sync"></i> 续期
+                                                    </button>
+                                                    <button class="btn btn-sm btn-danger terminate-lease-btn ml-1"
+                                                            data-username="{{ user.username }}"
+                                                            data-toggle="modal"
+                                                            data-target="#terminateLeaseModal">
+                                                        <i class="fas fa-times-circle"></i> 终止
+                                                    </button>
+                                                    {% endif %}
+                                                {% endwith %}
+
+                                                <button class="btn btn-sm btn-danger delete-user-btn ml-1"
+                                                        data-username="{{ user.username }}"
+                                                        data-account-type="外部目录"
+                                                        data-toggle="modal"
+                                                        data-target="#deleteUserModal">
+                                                    <i class="fas fa-trash"></i> 删除
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">暂无外部共享目录</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 租期全局设置 -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">租期全局设置</div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_lease_settings">
+
+                        <div class="form-row mb-3">
+                            <div class="col-md-4">
+                                <label for="default_lease_days">默认租期(天)</label>
+                                <input type="number" id="default_lease_days" name="default_lease_days"
+                                       value="{{ lease_settings.default_lease_days }}" min="1" max="3650" class="form-control" required>
+                                <small class="form-text text-muted">新创建的外部目录默认租期长度</small>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label for="default_notice_days">提前通知天数</label>
+                                <input type="number" id="default_notice_days" name="default_notice_days"
+                                       value="{{ lease_settings.default_notice_days }}" min="1" max="30" class="form-control" required>
+                                <small class="form-text text-muted">租期到期前多少天提醒管理员</small>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="d-block">自动管理</label>
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" class="custom-control-input" id="enabled" name="enabled" {% if lease_settings.enabled %}checked{% endif %}>
+                                    <label class="custom-control-label" for="enabled">启用自动租期管理</label>
+                                </div>
+                                <small class="form-text text-muted">禁用后将不会自动发送提醒或删除过期目录</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> 保存设置
+                            </button>
+                            <button type="button" class="btn btn-secondary ml-2" data-toggle="modal" data-target="#runLeaseManagementModal">
+                                <i class="fas fa-play"></i> 手动执行租期管理
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：创建内部用户 -->
+<div class="modal fade" id="createInternalModal" tabindex="-1" role="dialog" aria-labelledby="createInternalModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create_internal">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createInternalModalLabel">创建内部用户</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="internalUsername">用户名</label>
+                        <input type="text" class="form-control" id="internalUsername" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="internalPassword">密码</label>
+                        <input type="password" class="form-control" id="internalPassword" name="password" required minlength="8">
+                        <small class="form-text text-muted">密码长度至少为8位</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="internalEmail">邮箱(可选)</label>
+                        <input type="email" class="form-control" id="internalEmail" name="email">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">创建用户</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：创建外部目录 -->
+<div class="modal fade" id="createExternalModal" tabindex="-1" role="dialog" aria-labelledby="createExternalModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create_external">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createExternalModalLabel">创建外部共享目录</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="externalUsername">目录名称</label>
+                        <input type="text" class="form-control" id="externalUsername" name="username" required>
+                        <small class="form-text text-muted">将作为SFTP登录用户名和目录名</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="externalPassword">密码</label>
+                        <input type="password" class="form-control" id="externalPassword" name="password" required minlength="8">
+                        <small class="form-text text-muted">密码长度至少为8位</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="externalManager">对接管理员</label>
+                        <input type="text" class="form-control" id="externalManager" name="manager" required>
+                        <small class="form-text text-muted">负责管理此目录的内部用户，用于接收到期通知</small>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        此目录将自动设置租期，当前默认租期为 {{ lease_settings.default_lease_days }} 天，
+                        到期前 {{ lease_settings.default_notice_days }} 天会邮件通知对接管理员。
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">创建目录</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：重置密码 -->
+<div class="modal fade" id="resetPasswordModal" tabindex="-1" role="dialog" aria-labelledby="resetPasswordModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reset_password">
+                <input type="hidden" id="resetUsername" name="username">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="resetPasswordModalLabel">重置密码</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>将为用户 "<span id="resetTargetUsername"></span>" 重置密码</p>
+                    <div class="form-group">
+                        <label for="newPassword">新密码</label>
+                        <input type="password" class="form-control" id="newPassword" name="new_password" required minlength="8">
+                        <small class="form-text text-muted">密码长度至少为8位</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning">重置密码</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：删除用户/目录 -->
+<div class="modal fade" id="deleteUserModal" tabindex="-1" role="dialog" aria-labelledby="deleteUserModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_user">
+                <input type="hidden" id="deleteUsername" name="username">
+                <input type="hidden" id="deleteAccountType" name="account_type">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="deleteUserModalLabel">确认删除</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-danger">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        警告：此操作将<span id="deleteWarningText">永久删除</span>账户及所有数据，不可恢复！
+                    </p>
+                    <p>确认要删除 "<span id="deleteTargetUsername"></span>" 吗？</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger">确认删除</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：续期租约 -->
+<div class="modal fade" id="renewLeaseModal" tabindex="-1" role="dialog" aria-labelledby="renewLeaseModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="renew_lease">
+                <input type="hidden" id="renewUsername" name="username">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="renewLeaseModalLabel">续期租约</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>将为目录 "<span id="renewTargetUsername"></span>" 延长租期</p>
+                    <div class="form-group">
+                        <label for="additionalDays">延长天数</label>
+                        <input type="number" class="form-control" id="additionalDays" name="additional_days" value="30" min="1" max="365" required>
+                        <small class="form-text text-muted">可以延长1-365天</small>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        续期后，系统将重置提醒状态，并在新的到期日期前再次发送提醒。
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-info">延长租期</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：终止租约 -->
+<div class="modal fade" id="terminateLeaseModal" tabindex="-1" role="dialog" aria-labelledby="terminateLeaseModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="terminate_lease">
+                <input type="hidden" id="terminateUsername" name="username">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title" id="terminateLeaseModalLabel">提前终止租约</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-warning">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        警告：此操作将立即删除目录及所有内容！
+                    </p>
+                    <p>确认要提前终止目录 "<span id="terminateTargetUsername"></span>" 的租约吗？</p>
+                    <div class="form-group">
+                        <label for="terminationReason">终止原因</label>
+                        <textarea class="form-control" id="terminationReason" name="reason" rows="3" placeholder="请输入终止原因，将通知对接管理员">管理员提前终止</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning">确认终止</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框：手动执行租期管理 -->
+<div class="modal fade" id="runLeaseManagementModal" tabindex="-1" role="dialog" aria-labelledby="runLeaseManagementModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="run_lease_management">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="runLeaseManagementModalLabel">手动执行租期管理</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>此操作将立即执行租期管理任务：</p>
+                    <ul>
+                        <li>检查即将到期的目录并发送提醒邮件</li>
+                        <li>删除已过期的目录及其内容</li>
+                        <li>更新租期记录状态</li>
+                    </ul>
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        此操作会立即删除所有已过期的目录，请确保这是您想要的操作！
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">执行租期管理</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // 重置密码模态框
+    $('.reset-password-btn').click(function() {
+        const username = $(this).data('username');
+        $('#resetUsername').val(username);
+        $('#resetTargetUsername').text(username);
+    });
+
+    // 删除用户/目录模态框
+    $('.delete-user-btn').click(function() {
+        const username = $(this).data('username');
+        const accountType = $(this).data('account-type');
+        $('#deleteUsername').val(username);
+        $('#deleteAccountType').val(accountType);
+        $('#deleteTargetUsername').text(username);
+
+        if (accountType === '外部目录') {
+            $('#deleteWarningText').html('<strong>永久删除此目录及所有内容</strong>');
+        } else {
+            $('#deleteWarningText').html('<strong>永久删除此用户账户</strong>');
+        }
+    });
+
+    // 续期租约模态框
+    $('.renew-lease-btn').click(function() {
+        const username = $(this).data('username');
+        $('#renewUsername').val(username);
+        $('#renewTargetUsername').text(username);
+    });
+
+    // 终止租约模态框
+    $('.terminate-lease-btn').click(function() {
+        const username = $(this).data('username');
+        $('#terminateUsername').val(username);
+        $('#terminateTargetUsername').text(username);
+    });
+
+    // 表单提交确认
+    $('form').submit(function() {
+        // 删除操作确认
+        if ($(this).find('input[name="action"]').val() === 'delete_user') {
+            return confirm('确认要永久删除此账户/目录及所有数据吗？此操作不可恢复！');
+        }
+
+        // 终止租约确认
+        if ($(this).find('input[name="action"]').val() === 'terminate_lease') {
+            return confirm('确认要提前终止此目录的租约并删除所有内容吗？此操作不可恢复！');
+        }
+
+        // 租期管理确认
+        if ($(this).find('input[name="action"]').val() === 'run_lease_management') {
+            return confirm('确认要立即执行租期管理任务吗？这将删除所有已过期的目录！');
+        }
+
+        return true;
+    });
+
+    // 密码可见性切换
+    $('.toggle-password').click(function() {
+        const $input = $(this).prev('input');
+        const $icon = $(this).find('i');
+
+        if ($input.attr('type') === 'password') {
+            $input.attr('type', 'text');
+            $icon.removeClass('fa-eye').addClass('fa-eye-slash');
+        } else {
+            $input.attr('type', 'password');
+            $icon.removeClass('fa-eye-slash').addClass('fa-eye');
+        }
+    });
+});
+</script>
+{% endblock %}
