@@ -27,13 +27,12 @@ scheduler = BackgroundScheduler(timezone=settings.TIME_ZONE)
 
 
 def start_scheduler():
-    """启动APS调度器"""
+    """启动APS调度器（适配新版APScheduler）"""
     try:
-        # 避免重复添加job store
-        if not scheduler.get_jobstore('default'):
-            scheduler.add_jobstore(DjangoJobStore(), "default")
+        # 清空已有任务（避免重复添加）
+        scheduler.remove_all_jobs()
 
-        # 注册租期检查任务 - 每天凌晨2点执行
+        # 直接添加任务（无需手动管理 jobstore）
         scheduler.add_job(
             check_and_process_leases,
             trigger=CronTrigger(hour=2, minute=0),
@@ -43,10 +42,7 @@ def start_scheduler():
             misfire_grace_time=3600  # 1小时的宽限期
         )
 
-        # 添加调度器事件监听
-        register_events(scheduler)
-
-        # 启动调度器
+        # 启动调度器（仅启动一次）
         if not scheduler.running:
             scheduler.start()
             logger.info("APScheduler已启动，租期管理任务已注册")
