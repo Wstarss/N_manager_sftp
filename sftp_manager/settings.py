@@ -44,19 +44,3 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-# 添加到INSTALLED_APPS
-INSTALLED_APPS += [
-    'django_apscheduler',
-]
-
-# APScheduler配置
-APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"  # 任务执行时间格式
-APSCHEDULER_RUN_NOW_TIMEOUT = 25  # 执行任务超时时间(秒)
-# 邮件设置
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.yourdomain.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'sftp-system@yourdomain.com'
-EMAIL_HOST_PASSWORD = 'your-email-password'
-DEFAULT_FROM_EMAIL = 'SFTP系统管理员 <sftp-system@yourdomain.com>'
