@@ -7,10 +7,14 @@ For more information on this file, see
 https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
 """
 
+# sftp_manager/wsgi.py 补充
 import os
-
-from django.core.asgi import get_asgi_application
+from django.core.wsgi import get_wsgi_application
+from sftp_web.views import start_scheduler
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sftp_manager.settings')
 
-application = get_asgi_application()
+application = get_wsgi_application()
+
+# 启动调度器（仅在WSGI启动时执行一次）
+start_scheduler()

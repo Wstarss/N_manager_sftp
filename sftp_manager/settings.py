@@ -8,7 +8,7 @@ DEBUG = True  # 生产环境设为False
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
-    'django.contrib.staticfiles',
+    'django_apscheduler',
     'sftp_web',
 ]
 
@@ -33,7 +33,17 @@ TEMPLATES = [
         },
     },
 ]
-
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.163.com'        # 邮件服务器
+EMAIL_PORT = 465                   # SSL端口
+EMAIL_USE_SSL = True
+EMAIL_HOST_USER = 'your_email@163.com'  # 发件人邮箱
+EMAIL_HOST_PASSWORD = 'your_auth_code'  # 邮箱授权码
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+CRONJOBS = [
+    # 每天10:30执行检查任务（可前端配置时间）
+    ('30 10 * * *', 'sftp_app.tasks.check_sftp_users', '>> sftp_cron.log 2>&1')
+]
 WSGI_APPLICATION = 'sftp_manager.wsgi.application'
 
 LANGUAGE_CODE = 'zh-hans'
@@ -44,19 +54,33 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-# 添加到INSTALLED_APPS
-INSTALLED_APPS += [
-    'django_apscheduler',
-]
-
-# APScheduler配置
-APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"  # 任务执行时间格式
-APSCHEDULER_RUN_NOW_TIMEOUT = 25  # 执行任务超时时间(秒)
-# 邮件设置
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.yourdomain.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'sftp-system@yourdomain.com'
-EMAIL_HOST_PASSWORD = 'your-email-password'
-DEFAULT_FROM_EMAIL = 'SFTP系统管理员 <sftp-system@yourdomain.com>'
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs/sftp_lease.log'),
+            'formatter': 'verbose',
+        },
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'sftp_web': {  # 对应 views.py 中的 logger = logging.getLogger(__name__)
+            'handlers': ['file', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+}
